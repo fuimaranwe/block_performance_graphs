@@ -1,16 +1,16 @@
 # Moodle Performance Graphs Block Plugin (`block_performance_graphs`)
 
-An interactive, modern performance analytics and visualization block plugin for Moodle 4.0+. It renders real-time, customizable charts for class-wide progress and individual student performance using **ApexCharts**.
+An interactive performance analytics and visualization block plugin for Moodle 4.0+. It renders real-time, customizable charts for class-wide progress and individual student performance using ApexCharts.
 
 ---
 
-## 📊 Features
+## Features
 
 - **Multiple Chart Types**:
-  - 📊 **Bar / Column Chart**: Modern gradient bars with optional passing threshold highlighting (red for failing, green for passing).
-  - 🍩 **Pie / Donut Chart**: Clear breakdown of completion and progress status.
-  - 🎯 **Radial Bar Chart**: Sleek circular progress meters for course activity completion.
-  - 📈 **Line / Area Chart**: Smooth trend tracking for assignment and quiz performance over time.
+  - **Bar / Column Chart**: Modern gradient bars with optional passing threshold highlighting (red for failing, green for passing).
+  - **Pie / Donut Chart**: Clear breakdown of completion and progress status.
+  - **Radial Bar Chart**: Circular progress meters for course activity completion.
+  - **Line / Area Chart**: Smooth trend tracking for assignment and quiz performance over time.
 
 - **Dual Viewing Modes**:
   - **Class Mode** *(Teachers & Admins)*:
@@ -21,13 +21,13 @@ An interactive, modern performance analytics and visualization block plugin for 
     - Individual Assignment & Quiz Scores.
     - **Class Average Overlay**: Compare individual scores against the overall class average line.
 
-- **Dynamic AJAX Filtering**: Select courses, students, and metric types directly within the block with zero page reloads.
+- **Dynamic AJAX Filtering**: Select courses, students, and metric types directly within the block without page reloads.
 
-- **Fully Responsive & Animated**: Powered by ApexCharts with smooth micro-animations and responsive layout adaptation.
+- **Responsive & Animated**: Powered by ApexCharts with smooth transitions and responsive layout adaptation.
 
 ---
 
-## ⚙️ Requirements
+## Requirements
 
 - **Moodle Version**: Moodle 4.0 (2022041900) or higher.
 - **PHP Version**: PHP 7.4 or PHP 8.x.
@@ -35,7 +35,7 @@ An interactive, modern performance analytics and visualization block plugin for 
 
 ---
 
-## 🚀 Installation
+## Installation
 
 1. **Download / Clone**:
    Clone or extract this repository into your Moodle installation's `blocks/` directory:
@@ -56,7 +56,7 @@ An interactive, modern performance analytics and visualization block plugin for 
 
 ---
 
-## 🛠️ Configuration
+## Configuration
 
 Edit the block instance settings to customize the display:
 
@@ -71,7 +71,7 @@ Edit the block instance settings to customize the display:
 
 ---
 
-## 📁 Directory Structure
+## Directory Structure
 
 ```
 block_performance_graphs/
@@ -94,18 +94,18 @@ block_performance_graphs/
 
 ---
 
-## 🔒 Privacy & GDPR
+## Privacy & GDPR
 
 This plugin implements Moodle's Privacy API (`\core_privacy\local\metadata\null_provider`), confirming that it reads grade and completion data to display graphs but stores no personal data directly in additional plugin database tables.
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
-Contributions, bug reports, and feature requests are welcome! Feel free to open an issue or submit a Pull Request on [GitHub](https://github.com/fuimaranwe/block_performance_graphs).
+Contributions, bug reports, and feature requests are welcome. Feel free to open an issue or submit a Pull Request on [GitHub](https://github.com/fuimaranwe/block_performance_graphs).
 
 ---
 
-## 📄 License
+## License
 
 This plugin is licensed under the [GNU General Public License v3.0](https://www.gnu.org/licenses/gpl-3.0.html) or later.
