@@ -1,0 +1,73 @@
+<div class="block-performance-graphs-card" style="
+    --border-radius-lg: 12px;
+    --card-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    border-radius: var(--border-radius-lg);
+    box-shadow: var(--card-shadow);
+    background-color: var(--card-bg, #fff);
+    padding: 20px;
+    margin-bottom: 20px;
+    border: 1px solid var(--card-border, #e0e0e0);
+">
+    <div class="chart-filters" style="display: flex; gap: 10px; margin-bottom: 20px;" data-blockid="{{block_id}}" data-sesskey="{{sesskey}}">
+        {{#has_multiple_courses}}
+        <select id="{{element_id}}-course-select" class="custom-select" style="padding: 5px; border-radius: 4px; border: 1px solid #ccc;">
+            {{#courses}}
+            <option value="{{id}}" {{#selected}}selected{{/selected}}>{{{name}}}</option>
+            {{/courses}}
+        </select>
+        {{/has_multiple_courses}}
+        
+        {{#is_student_mode}}
+        {{#has_multiple_students}}
+        <select id="{{element_id}}-student-select" class="custom-select" style="padding: 5px; border-radius: 4px; border: 1px solid #ccc;">
+            {{#students}}
+            <option value="{{id}}" {{#selected}}selected{{/selected}}>{{{name}}}</option>
+            {{/students}}
+        </select>
+        {{/has_multiple_students}}
+        {{/is_student_mode}}
+    </div>
+    <div class="chart-stat-callout" style="margin-bottom: 15px; display: none;">
+        <h2 style="margin: 0; font-size: 2em; font-weight: 600; color: var(--text-color, #333);"><span id="{{element_id}}-stat"></span></h2>
+        <span style="color: var(--text-muted, #666); font-size: 0.9em;" id="{{element_id}}-stat-label"></span>
+    </div>
+    
+    <div id="{{element_id}}-skeleton" class="chart-skeleton" style="min-height: 300px; display: flex; flex-direction: column; gap: 10px; justify-content: flex-end;">
+        <style>
+            @keyframes shimmer {
+                0% { background-position: -468px 0; }
+                100% { background-position: 468px 0; }
+            }
+            .skeleton-bar {
+                background: #f6f7f8;
+                background-image: linear-gradient(to right, #f6f7f8 0%, #edeef1 20%, #f6f7f8 40%, #f6f7f8 100%);
+                background-repeat: no-repeat;
+                background-size: 800px 100%;
+                animation: shimmer 1.5s linear infinite forwards;
+                border-radius: 4px;
+                flex: 1;
+            }
+            .skeleton-bars {
+                display: flex;
+                height: 250px;
+                gap: 15px;
+                align-items: flex-end;
+                padding-bottom: 30px;
+            }
+        </style>
+        <div class="skeleton-bars">
+            <div class="skeleton-bar" style="height: 40%;"></div>
+            <div class="skeleton-bar" style="height: 70%;"></div>
+            <div class="skeleton-bar" style="height: 50%;"></div>
+            <div class="skeleton-bar" style="height: 90%;"></div>
+            <div class="skeleton-bar" style="height: 60%;"></div>
+        </div>
+    </div>
+    
+    <div id="{{element_id}}" class="performance-graph-container" style="min-height: 300px;"></div>
+</div>
+{{#js}}
+require(['block_performance_graphs/chart'], function(chart) {
+    chart.init('{{element_id}}', '{{{chart_config}}}');
+});
+{{/js}}
