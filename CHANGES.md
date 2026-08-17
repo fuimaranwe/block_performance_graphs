@@ -1,5 +1,9 @@
 # Change log
 
+## 0.3.2 - 2026-08-18
+
+- Expanded compatibility from Moodle 5.2.2 to the complete Moodle 5.2.x branch.
+
 ## 0.3.1 - 2026-08-17
 
 - Targeted Moodle 5.2.2 and its bundled Chart.js 4.5.1 API.

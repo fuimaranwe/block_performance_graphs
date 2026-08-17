@@ -9,8 +9,8 @@
 defined('MOODLE_INTERNAL') || die();
 
 $plugin->component = 'block_performance_graphs';
-$plugin->version = 2026081702;
-$plugin->requires = 2026042002.00; // Moodle 5.2.2.
+$plugin->version = 2026081800;
+$plugin->requires = 2026042000; // Moodle 5.2.0.
 $plugin->supported = [502, 502];
 $plugin->maturity = MATURITY_BETA;
-$plugin->release = 'v0.3.1';
+$plugin->release = 'v0.3.2';
