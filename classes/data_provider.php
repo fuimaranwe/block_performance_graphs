@@ -1,410 +1,556 @@
 <?php
+// This file is part of Moodle - http://moodle.org/.
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+
 namespace block_performance_graphs;
 
+defined('MOODLE_INTERNAL') || die();
+
+/**
+ * Provides authorised, presentation-ready performance data.
+ *
+ * @package    block_performance_graphs
+ * @copyright  2026 Ahmet Bülbül
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ */
 class data_provider {
-    public static function get_available_courses() {
-        global $USER, $SITE, $PAGE;
+    /** Supported chart types. */
+    private const CHART_TYPES = ['bar', 'pie', 'radial', 'line', 'area'];
+
+    /**
+     * Return courses that the current user can access from this page.
+     *
+     * @return array<int, string>
+     */
+    public static function get_available_courses(): array {
+        global $PAGE, $SITE, $USER;
+
         $courses = [];
-        if ($PAGE->course->id == $SITE->id) {
+        if ((int) $PAGE->course->id === (int) $SITE->id) {
             $usercourses = enrol_get_users_courses($USER->id, true, 'id, shortname');
-            foreach ($usercourses as $c) {
-                $courses[$c->id] = format_string($c->shortname);
+            foreach ($usercourses as $course) {
+                if (!self::can_access_course((int) $course->id)) {
+                    continue;
+                }
+                $context = \context_course::instance($course->id);
+                $courses[$course->id] = format_string($course->shortname, true, [
+                    'context' => $context,
+                    'escape' => false,
+                ]);
             }
-        } else {
-            $courses[$PAGE->course->id] = format_string($PAGE->course->shortname);
+        } elseif (self::can_access_course((int) $PAGE->course->id)) {
+            $context = \context_course::instance($PAGE->course->id);
+            $courses[$PAGE->course->id] = format_string($PAGE->course->shortname, true, [
+                'context' => $context,
+                'escape' => false,
+            ]);
         }
+
         return $courses;
     }
 
-    public static function get_available_students($courseid) {
-        global $USER;
-        $students = [];
-        $context = \context_course::instance($courseid);
-        
-        if (has_capability('moodle/grade:viewall', $context)) {
-            $enrolled = get_enrolled_users($context, 'mod/assign:submit', 0, 'u.id, u.firstname, u.lastname');
-            if ($enrolled) {
-                foreach ($enrolled as $u) {
-                    $students[$u->id] = fullname($u);
-                }
-            }
-        } else {
-            $students[$USER->id] = fullname($USER);
+    /**
+     * Return students whose grades the current user may view in a course.
+     *
+     * Separate-group restrictions are applied to users without accessallgroups.
+     *
+     * @param int $courseid Course ID.
+     * @return array<int, string>
+     */
+    public static function get_available_students(int $courseid): array {
+        global $DB, $USER;
+
+        if (!self::can_access_course($courseid)) {
+            return [];
         }
+
+        $context = \context_course::instance($courseid);
+        if (!has_capability('moodle/grade:viewall', $context)) {
+            if (is_enrolled($context, $USER, '', true) && has_capability('moodle/grade:view', $context)) {
+                return [$USER->id => fullname($USER)];
+            }
+            return [];
+        }
+
+        $course = $DB->get_record('course', ['id' => $courseid], '*', MUST_EXIST);
+        $allowedids = null;
+        if (groups_get_course_groupmode($course) === SEPARATEGROUPS &&
+                !has_capability('moodle/site:accessallgroups', $context)) {
+            $usergroups = groups_get_user_groups($courseid, $USER->id)[0] ?? [];
+            $allowedids = [];
+            foreach ($usergroups as $groupid) {
+                $allowedids += groups_get_members($groupid, 'u.id');
+            }
+            $allowedids = array_keys($allowedids);
+        }
+
+        $enrolled = get_enrolled_users(
+            $context,
+            '',
+            0,
+            'u.id, u.firstname, u.lastname, u.firstnamephonetic, u.lastnamephonetic, u.middlename, u.alternatename',
+            'u.lastname, u.firstname',
+            0,
+            0,
+            true
+        );
+        $students = [];
+        foreach ($enrolled as $user) {
+            if ($allowedids !== null && !in_array((int) $user->id, $allowedids, true)) {
+                continue;
+            }
+            if (!has_capability('moodle/grade:view', $context, $user) ||
+                    has_capability('moodle/grade:viewall', $context, $user)) {
+                continue;
+            }
+            $students[$user->id] = fullname($user);
+        }
+
         return $students;
     }
 
-    public static function get_performance_data($config) {
-        if (!$config) {
-            return self::get_empty_chart('bar');
-        }
-
-        $type = !empty($config->chart_type) ? $config->chart_type : 'bar';
-        $mode = !empty($config->target_mode) ? $config->target_mode : 'class';
-        $courseid = !empty($config->course) ? $config->course : 0;
-        $color = !empty($config->chart_color) ? $config->chart_color : '#008FFB';
-        
-        if (!$courseid) {
-            return self::get_empty_chart($type);
-        }
-
+    /**
+     * Build chart data for the current user.
+     *
+     * @param ?object $config Block configuration.
+     * @return array<string, mixed>
+     */
+    public static function get_performance_data(?object $config): array {
         global $DB, $USER;
-        $title = '';
-        $course = $DB->get_record('course', ['id' => $courseid], 'shortname');
-        $coursename = $course ? format_string($course->shortname) : '';
-        $context = \context_course::instance($courseid);
 
-        $chart_data = self::get_empty_chart($type);
+        $type = self::normalise_chart_type($config->chart_type ?? 'bar');
+        if (!$config || empty($config->course)) {
+            return self::decorate_chart(self::get_empty_chart($type), $type);
+        }
+
+        $courseid = (int) $config->course;
+        if (!self::can_access_course($courseid)) {
+            return self::decorate_chart(self::get_empty_chart($type), $type);
+        }
+
+        $course = $DB->get_record('course', ['id' => $courseid], 'id, shortname', MUST_EXIST);
+        $context = \context_course::instance($courseid);
+        $coursename = format_string($course->shortname, true, ['context' => $context, 'escape' => false]);
+        $mode = ($config->target_mode ?? 'class') === 'student' ? 'student' : 'class';
+        $metric = '';
+        $title = '';
+        $chartdata = self::get_empty_chart($type);
 
         if ($mode === 'class') {
             if (!has_capability('moodle/grade:viewall', $context)) {
-                return self::get_empty_chart($type);
+                return self::decorate_chart($chartdata, $type);
             }
+            $studentids = array_keys(self::get_available_students($courseid));
+            $metric = in_array(($config->class_metric ?? ''), ['completion', 'quiz_averages'], true)
+                ? $config->class_metric : 'completion';
             $title = $coursename;
-            $metric = !empty($config->class_metric) ? $config->class_metric : 'completion';
-            
             if ($metric === 'completion') {
-                $chart_data = self::get_class_completion_data($courseid, $type);
-            } else if ($metric === 'quiz_averages') {
-                $chart_data = self::get_class_quiz_averages($courseid, $type);
-            }
-        } else if ($mode === 'student') {
-            $metric = !empty($config->student_metric) ? $config->student_metric : 'activity_completion';
-            $studentid = !empty($config->student) ? $config->student : 0;
-            
-            if (!$studentid) {
-                return self::get_empty_chart($type);
-            }
-
-            if ($studentid != $USER->id && !has_capability('moodle/grade:viewall', $context)) {
-                $studentid = $USER->id;
-            }
-
-            $user = $DB->get_record('user', ['id' => $studentid], 'firstname, lastname');
-            $username = $user ? fullname($user) : 'Student';
-            $title = $username . ' - ' . $coursename;
-            
-            if ($metric === 'activity_completion') {
-                $chart_data = self::get_student_completion_progress($courseid, $studentid, $type);
-            } else if ($metric === 'all_scores') {
-                $show_average = !empty($config->class_average);
-                $chart_data = self::get_student_activity_scores($courseid, $studentid, $type, $show_average);
-            }
-        }
-        
-        if (!empty($title)) {
-            $chart_data['title'] = ['text' => $title, 'align' => 'left'];
-        }
-        if (!empty($color)) {
-            if ($type === 'pie' || $type === 'radial') {
-                $chart_data['colors'] = self::generate_color_palette($color, 5);
+                $chartdata = self::get_class_completion_data($courseid, $studentids, $type);
             } else {
-                $chart_data['colors'] = [$color];
+                $chartdata = self::get_class_quiz_averages($courseid, $studentids, $type);
+            }
+        } else {
+            $metric = in_array(($config->student_metric ?? ''), ['activity_completion', 'all_scores'], true)
+                ? $config->student_metric : 'activity_completion';
+            $studentid = !empty($config->student) ? (int) $config->student : (int) $USER->id;
+            $availablestudents = self::get_available_students($courseid);
+            if (!array_key_exists($studentid, $availablestudents)) {
+                return self::decorate_chart($chartdata, $type);
+            }
+
+            $user = $DB->get_record(
+                'user',
+                ['id' => $studentid],
+                'id, firstname, lastname, firstnamephonetic, lastnamephonetic, middlename, alternatename',
+                MUST_EXIST
+            );
+            $title = fullname($user) . ' - ' . $coursename;
+            if ($metric === 'activity_completion') {
+                $chartdata = self::get_student_completion_progress($courseid, $studentid, $type);
+            } else {
+                $showaverage = !empty($config->class_average) && has_capability('moodle/grade:viewall', $context);
+                $chartdata = self::get_student_activity_scores($courseid, $studentid, $type, $showaverage);
             }
         }
 
-        if ($type === 'bar' && !empty($config->enable_threshold) && isset($config->passing_grade) && $config->passing_grade > 0) {
-            $threshold = (float)$config->passing_grade;
-            if (!isset($chart_data['plotOptions'])) {
-                $chart_data['plotOptions'] = [];
-            }
-            if (!isset($chart_data['plotOptions']['bar'])) {
-                $chart_data['plotOptions']['bar'] = [];
-            }
-            if (!isset($chart_data['plotOptions']['bar']['colors'])) {
-                $chart_data['plotOptions']['bar']['colors'] = [];
-            }
-            $chart_data['plotOptions']['bar']['colors']['ranges'] = [
-                ['from' => 0, 'to' => $threshold - 0.01, 'color' => '#FF4560'],
-                ['from' => $threshold, 'to' => 100, 'color' => '#00E396']
+        $chartdata['title'] = ['text' => $title];
+        $color = self::normalise_color($config->chart_color ?? '#0f6cbf');
+        $chartdata['colors'] = ($type === 'pie' || $type === 'radial')
+            ? self::generate_color_palette($color, 5) : [$color, '#6f42c1'];
+
+        if ($type === 'bar' && !empty($config->enable_threshold)) {
+            $threshold = max(0, min(100, (float) ($config->passing_grade ?? 50)));
+            $chartdata['threshold'] = [
+                'value' => $threshold,
+                'fail_color' => '#dc3545',
+                'pass_color' => '#198754',
             ];
         }
-        
-        $chart_data['chart']['animations'] = [
-            'enabled' => true,
-            'easing' => 'easeinout',
-            'speed' => 800,
-            'animateGradually' => ['enabled' => true, 'delay' => 150],
-            'dynamicAnimation' => ['enabled' => true, 'speed' => 350]
-        ];
-        $chart_data['tooltip'] = ['theme' => 'light', 'style' => ['fontSize' => '14px']];
 
-        if ($type === 'bar') {
-            if (!isset($chart_data['plotOptions'])) $chart_data['plotOptions'] = [];
-            if (!isset($chart_data['plotOptions']['bar'])) $chart_data['plotOptions']['bar'] = [];
-            $chart_data['plotOptions']['bar']['borderRadius'] = 6;
-            
-            $chart_data['fill'] = [
-                'type' => 'gradient',
-                'gradient' => [
-                    'shade' => 'light', 'type' => 'vertical', 'shadeIntensity' => 0.25,
-                    'inverseColors' => false, 'opacityFrom' => 0.9, 'opacityTo' => 0.7, 'stops' => [0, 100]
-                ]
-            ];
-        } else if ($type === 'line' || $type === 'area') {
-            $chart_data['stroke'] = ['curve' => 'smooth', 'width' => 3];
-            if ($type === 'area') {
-                $chart_data['fill'] = [
-                    'type' => 'gradient',
-                    'gradient' => [
-                        'shadeIntensity' => 1, 'opacityFrom' => 0.7, 'opacityTo' => 0.2, 'stops' => [0, 100]
-                    ]
-                ];
-            }
-        }
-
-        $chart_data['noData'] = [
-            'text' => 'No data available',
-            'align' => 'center',
-            'verticalAlign' => 'middle',
-            'style' => ['color' => '#888', 'fontSize' => '16px']
-        ];
-
-        if (!empty($chart_data['series'])) {
+        if (!empty($chartdata['series'])) {
             if ($metric === 'completion' && $mode === 'class') {
-                $completed = $chart_data['series'][0]['data'][0] ?? 0;
-                $in_progress = $chart_data['series'][0]['data'][1] ?? 0;
-                if (($completed + $in_progress) > 0) {
-                    $chart_data['_stat_callout'] = ['value' => round(($completed / ($completed + $in_progress)) * 100) . '%', 'label' => 'Class Completion Rate'];
-                }
-            } else if ($metric === 'activity_completion' && $mode === 'student') {
-                if ($type === 'radial' || $type === 'pie') {
-                    $chart_data['_stat_callout'] = ['value' => ($chart_data['series'][0] ?? 0) . '%', 'label' => 'Activities Completed'];
-                } else {
-                    $completed = $chart_data['series'][0]['data'][0] ?? 0;
-                    $in_progress = $chart_data['series'][0]['data'][1] ?? 0;
-                    if (($completed + $in_progress) > 0) {
-                        $chart_data['_stat_callout'] = ['value' => round(($completed / ($completed + $in_progress)) * 100) . '%', 'label' => 'Activities Completed'];
-                    }
-                }
+                self::add_completion_callout($chartdata, get_string('classcompletionrate', 'block_performance_graphs'));
+            } elseif ($metric === 'activity_completion' && $mode === 'student') {
+                self::add_completion_callout($chartdata, get_string('activitiescompleted', 'block_performance_graphs'));
             }
         }
 
-        if (isset($chart_data['series'][0]['data']) && count($chart_data['series'][0]['data']) == 1 && $chart_data['series'][0]['data'][0] === 0) {
-            $cat = $chart_data['xaxis']['categories'][0] ?? '';
-            if (in_array($cat, ['No Quizzes Found', 'No Grades Found', 'No trackable activities'])) {
-                $chart_data['series'] = [];
-                $chart_data['noData']['text'] = $cat;
-            }
-        }
-
-        return $chart_data;
+        return self::decorate_chart($chartdata, $type);
     }
 
-    private static function generate_color_palette($base_color, $count) {
-        $colors = [$base_color];
-        $base_color = ltrim($base_color, '#');
-        if (strlen($base_color) == 6) {
-            list($r, $g, $b) = array(
-                hexdec(substr($base_color, 0, 2)),
-                hexdec(substr($base_color, 2, 2)),
-                hexdec(substr($base_color, 4, 2))
+    /**
+     * Add a correctly calculated completion callout.
+     *
+     * @param array $chartdata Chart data, modified in place.
+     * @param string $label Callout label.
+     */
+    private static function add_completion_callout(array &$chartdata, string $label): void {
+        $charttype = $chartdata['chart']['type'] ?? 'bar';
+        if ($charttype === 'radialBar') {
+            $percentage = (float) ($chartdata['series'][0] ?? 0);
+        } elseif ($charttype === 'pie') {
+            $completed = (float) ($chartdata['series'][0] ?? 0);
+            $total = array_sum($chartdata['series']);
+            $percentage = $total > 0 ? ($completed / $total) * 100 : 0;
+        } else {
+            $completed = (float) ($chartdata['series'][0]['data'][0] ?? 0);
+            $remaining = (float) ($chartdata['series'][0]['data'][1] ?? 0);
+            $percentage = ($completed + $remaining) > 0 ? ($completed / ($completed + $remaining)) * 100 : 0;
+        }
+        $chartdata['_stat_callout'] = ['value' => round($percentage) . '%', 'label' => $label];
+    }
+
+    /**
+     * Add shared, localised presentation metadata.
+     *
+     * @param array $chartdata Chart data.
+     * @param string $type Requested chart type.
+     * @return array
+     */
+    private static function decorate_chart(array $chartdata, string $type): array {
+        $chartdata['no_data_text'] = $chartdata['no_data_text'] ?? get_string('nodata', 'block_performance_graphs');
+        $chartdata['table_summary'] = get_string('viewchartdata', 'block_performance_graphs');
+        $chartdata['table_caption'] = get_string('chartdata', 'block_performance_graphs');
+        $chartdata['category_label'] = get_string('category', 'block_performance_graphs');
+        $chartdata['value_label'] = get_string('value', 'block_performance_graphs');
+        $chartdata['chart_aria_label'] = get_string('chartarialabel', 'block_performance_graphs',
+            get_string('type_' . $type, 'block_performance_graphs'));
+        return $chartdata;
+    }
+
+    /** Check whether the current user can access a course. */
+    private static function can_access_course(int $courseid): bool {
+        global $DB, $USER;
+
+        $course = $DB->get_record('course', ['id' => $courseid]);
+        if (!$course) {
+            return false;
+        }
+        return \can_access_course($course, $USER, '', true);
+    }
+
+    /** Return a safe chart type. */
+    private static function normalise_chart_type(string $type): string {
+        return in_array($type, self::CHART_TYPES, true) ? $type : 'bar';
+    }
+
+    /** Return a safe CSS colour. */
+    private static function normalise_color(string $color): string {
+        return preg_match('/^#[0-9a-f]{6}$/i', $color) ? $color : '#0f6cbf';
+    }
+
+    /** Generate related chart colours. */
+    private static function generate_color_palette(string $basecolor, int $count): array {
+        $colors = [$basecolor];
+        $hex = ltrim($basecolor, '#');
+        $red = hexdec(substr($hex, 0, 2));
+        $green = hexdec(substr($hex, 2, 2));
+        $blue = hexdec(substr($hex, 4, 2));
+        for ($index = 1; $index < $count; $index++) {
+            $factor = $index / ($count + 1);
+            $colors[] = sprintf(
+                '#%02x%02x%02x',
+                (int) round($red + (255 - $red) * $factor),
+                (int) round($green + (255 - $green) * $factor),
+                (int) round($blue + (255 - $blue) * $factor)
             );
-            
-            for ($i = 1; $i < $count; $i++) {
-                // lighten the color
-                $r = min(255, $r + 30);
-                $g = min(255, $g + 30);
-                $b = min(255, $b + 30);
-                $colors[] = sprintf("#%02x%02x%02x", $r, $g, $b);
-            }
         }
         return $colors;
     }
-    
-    private static function get_empty_chart($type) {
+
+    /** Return an empty chart structure. */
+    private static function get_empty_chart(string $type): array {
         if ($type === 'pie') {
-            return ['series' => [], 'labels' => [], 'chart' => ['type' => 'pie', 'width' => '100%']];
-        } else if ($type === 'radial') {
-            return ['series' => [], 'labels' => [], 'chart' => ['type' => 'radialBar', 'height' => 350]];
-        } else if ($type === 'line' || $type === 'area') {
-            return ['series' => [], 'xaxis' => ['categories' => []], 'chart' => ['type' => $type, 'height' => 350]];
+            return ['series' => [], 'labels' => [], 'chart' => ['type' => 'pie']];
         }
-        return ['series' => [], 'xaxis' => ['categories' => []], 'chart' => ['type' => 'bar', 'height' => 350]];
+        if ($type === 'radial') {
+            return ['series' => [], 'labels' => [], 'chart' => ['type' => 'radialBar']];
+        }
+        return ['series' => [], 'xaxis' => ['categories' => []], 'chart' => ['type' => $type]];
     }
 
-    private static function get_class_completion_data($courseid, $type) {
+    /** Class completion, including students without a course_completions row. */
+    private static function get_class_completion_data(int $courseid, array $studentids, string $type): array {
         global $DB;
-        
+
+        $course = $DB->get_record('course', ['id' => $courseid], 'id, enablecompletion', MUST_EXIST);
+        if (empty($course->enablecompletion)) {
+            $chart = self::get_empty_chart($type);
+            $chart['no_data_text'] = get_string('completionnotenabled', 'block_performance_graphs');
+            return $chart;
+        }
+        if (!$studentids) {
+            return self::format_chart_data([], [], $type, get_string('students'), false);
+        }
+        [$insql, $params] = $DB->get_in_or_equal($studentids, SQL_PARAMS_NAMED, 'student');
+        $params['courseid'] = $courseid;
+        $records = $DB->get_records_sql(
+            "SELECT userid, timecompleted
+               FROM {course_completions}
+              WHERE course = :courseid AND userid $insql",
+            $params
+        );
         $completed = 0;
-        $in_progress = 0;
-        
-        try {
-            $sql = "SELECT userid, timecompleted FROM {course_completions} WHERE course = :course";
-            $records = $DB->get_records_sql($sql, ['course' => $courseid]);
-            foreach ($records as $r) {
-                if ($r->timecompleted > 0) {
-                    $completed++;
-                } else {
-                    $in_progress++;
-                }
+        foreach ($studentids as $studentid) {
+            if (!empty($records[$studentid]->timecompleted)) {
+                $completed++;
             }
-        } catch (\Exception $e) {
-            debugging($e->getMessage(), DEBUG_DEVELOPER);
         }
-        
-        $labels = ['Completed', 'In Progress'];
-        $data = [$completed, $in_progress];
-        
-        return self::format_chart_data($labels, $data, $type, 'Students');
+        $data = [$completed, count($studentids) - $completed];
+        return self::format_chart_data(
+            [get_string('completed', 'block_performance_graphs'), get_string('inprogress', 'block_performance_graphs')],
+            $data,
+            $type,
+            get_string('students'),
+            false
+        );
     }
 
-    private static function get_class_quiz_averages($courseid, $type) {
+    /** Class quiz averages for authorised, active students only. */
+    private static function get_class_quiz_averages(int $courseid, array $studentids, string $type): array {
         global $DB;
-        
+
+        if (!$studentids) {
+            return self::format_chart_data([], [], $type, get_string('averagescore', 'block_performance_graphs'), true);
+        }
+        [$insql, $params] = $DB->get_in_or_equal($studentids, SQL_PARAMS_NAMED, 'student');
+        $params['courseid'] = $courseid;
+        $visibilitysql = self::get_grade_visibility_sql($params);
+        $records = $DB->get_records_sql(
+            "SELECT q.id, q.name, AVG((gg.finalgrade / gi.grademax) * 100) AS avgpercent
+               FROM {quiz} q
+               JOIN {grade_items} gi
+                 ON gi.iteminstance = q.id AND gi.itemmodule = 'quiz' AND gi.itemtype = 'mod'
+               JOIN {grade_grades} gg ON gg.itemid = gi.id
+              WHERE q.course = :courseid
+                AND gg.userid $insql
+                AND gg.finalgrade IS NOT NULL
+                AND gi.grademax > 0
+                $visibilitysql
+           GROUP BY q.id, q.name
+           ORDER BY q.id",
+            $params
+        );
+        $context = \context_course::instance($courseid);
         $labels = [];
         $data = [];
-        
-        try {
-            // Find all quizzes in this course and their average grades
-            $sql = "SELECT q.id, q.name, AVG((gg.finalgrade / gi.grademax) * 100) AS avg_percent
-                    FROM {quiz} q
-                    JOIN {grade_items} gi ON gi.iteminstance = q.id AND gi.itemmodule = 'quiz' AND gi.itemtype = 'mod'
-                    JOIN {grade_grades} gg ON gg.itemid = gi.id
-                    WHERE q.course = :course AND gg.finalgrade IS NOT NULL AND gi.grademax > 0
-                    GROUP BY q.id, q.name";
-                    
-            $records = $DB->get_records_sql($sql, ['course' => $courseid]);
-            foreach ($records as $r) {
-                $name = format_string($r->name);
-                // Break long titles into multiple lines to prevent overlap in ApexCharts
-                $labels[] = explode("\n", wordwrap($name, 15, "\n"));
-                $data[] = round($r->avg_percent, 1);
-            }
-        } catch (\Exception $e) {
-            debugging($e->getMessage(), DEBUG_DEVELOPER);
+        foreach ($records as $record) {
+            $labels[] = format_string($record->name, true, ['context' => $context, 'escape' => false]);
+            $data[] = round((float) $record->avgpercent, 1);
         }
-        
-        if (empty($labels)) {
-            $labels[] = 'No Quizzes Found';
-            $data[] = 0;
-        }
-        
-        return self::format_chart_data($labels, $data, $type, 'Average Score (%)');
+        return self::format_chart_data($labels, $data, $type, get_string('averagescore', 'block_performance_graphs'), true);
     }
 
-    private static function get_student_completion_progress($courseid, $studentid, $type) {
+    /** Student completion over modules actually visible to that student. */
+    private static function get_student_completion_progress(int $courseid, int $studentid, string $type): array {
         global $DB;
-        
+
+        $modinfo = get_fast_modinfo($courseid, $studentid);
+        $moduleids = [];
+        foreach ($modinfo->get_cms() as $cm) {
+            if (!$cm->deletioninprogress && $cm->uservisible && $cm->completion != COMPLETION_TRACKING_NONE) {
+                $moduleids[] = $cm->id;
+            }
+        }
+        if (!$moduleids) {
+            $chart = self::format_chart_data([], [], $type, get_string('activities', 'block_performance_graphs'), false);
+            $chart['no_data_text'] = get_string('notrackableactivities', 'block_performance_graphs');
+            return $chart;
+        }
+        [$insql, $params] = $DB->get_in_or_equal($moduleids, SQL_PARAMS_NAMED, 'cm');
+        $params['studentid'] = $studentid;
+        $records = $DB->get_records_sql(
+            "SELECT coursemoduleid, completionstate
+               FROM {course_modules_completion}
+              WHERE userid = :studentid AND coursemoduleid $insql",
+            $params
+        );
         $completed = 0;
-        $total = 0;
-        
-        try {
-            $sql = "SELECT cm.id, cmc.completionstate 
-                    FROM {course_modules} cm
-                    LEFT JOIN {course_modules_completion} cmc ON cmc.coursemoduleid = cm.id AND cmc.userid = :userid
-                    WHERE cm.course = :course AND cm.completion > 0";
-                    
-            $records = $DB->get_records_sql($sql, ['userid' => $studentid, 'course' => $courseid]);
-            foreach ($records as $r) {
-                $total++;
-                if ($r->completionstate == 1 || $r->completionstate == 2) {
-                    $completed++;
-                }
+        foreach ($moduleids as $moduleid) {
+            if (isset($records[$moduleid]) && in_array((int) $records[$moduleid]->completionstate, [
+                    COMPLETION_COMPLETE,
+                    COMPLETION_COMPLETE_PASS,
+                    COMPLETION_COMPLETE_FAIL,
+                ], true)) {
+                $completed++;
             }
-        } catch (\Exception $e) {
-            debugging($e->getMessage(), DEBUG_DEVELOPER);
         }
-        
-        $incomplete = $total - $completed;
-        if ($total == 0) {
-            $labels = ['No trackable activities'];
-            $data = [0];
-        } else {
-            $labels = ['Completed', 'Remaining'];
-            $data = [$completed, $incomplete];
-        }
-        
-        return self::format_chart_data($labels, $data, $type, 'Activities');
+        return self::format_chart_data(
+            [get_string('completed', 'block_performance_graphs'), get_string('remaining', 'block_performance_graphs')],
+            [$completed, count($moduleids) - $completed],
+            $type,
+            get_string('activities', 'block_performance_graphs'),
+            false
+        );
     }
 
-    private static function get_student_activity_scores($courseid, $studentid, $type, $show_average = false) {
+    /** Student assignment and quiz scores, respecting hidden grades. */
+    private static function get_student_activity_scores(
+        int $courseid,
+        int $studentid,
+        string $type,
+        bool $showaverage
+    ): array {
         global $DB;
-        
+
+        $params = ['courseid' => $courseid, 'studentid' => $studentid];
+        $visibilitysql = self::get_grade_visibility_sql($params);
+        $records = $DB->get_records_sql(
+            "SELECT gi.id, gi.itemname, gi.itemmodule, gi.grademax,
+                    (gg.finalgrade / gi.grademax) * 100 AS percent
+               FROM {grade_items} gi
+               JOIN {grade_grades} gg ON gg.itemid = gi.id
+              WHERE gi.courseid = :courseid
+                AND gg.userid = :studentid
+                AND gi.itemtype = 'mod'
+                AND gi.itemmodule IN ('assign', 'quiz')
+                AND gg.finalgrade IS NOT NULL
+                AND gi.grademax > 0
+                $visibilitysql
+           ORDER BY gi.sortorder, gi.id",
+            $params
+        );
+        $context = \context_course::instance($courseid);
         $labels = [];
         $data = [];
-        $class_data = [];
-        
-        try {
-            $sql = "SELECT gi.id, gi.itemname, gi.itemmodule, gi.grademax, (gg.finalgrade / gi.grademax) * 100 AS percent
-                    FROM {grade_items} gi
-                    JOIN {grade_grades} gg ON gg.itemid = gi.id
-                    WHERE gi.courseid = :course AND gg.userid = :userid 
-                      AND gi.itemtype = 'mod' AND gi.itemmodule IN ('assign', 'quiz') 
-                      AND gg.finalgrade IS NOT NULL AND gi.grademax > 0";
-                      
-            $records = $DB->get_records_sql($sql, ['course' => $courseid, 'userid' => $studentid]);
-            foreach ($records as $r) {
-                $name = !empty($r->itemname) ? $r->itemname : ucfirst($r->itemmodule) . ' Activity';
-                $name = format_string($name);
-                $labels[] = explode("\n", wordwrap($name, 15, "\n"));
-                $data[] = round($r->percent, 1);
-                
-                if ($show_average) {
-                    $avg_sql = "SELECT AVG((finalgrade / :gmax) * 100) AS avg_percent 
-                                FROM {grade_grades} 
-                                WHERE itemid = :itemid AND finalgrade IS NOT NULL";
-                    $avg_record = $DB->get_record_sql($avg_sql, ['gmax' => $r->grademax, 'itemid' => $r->id]);
-                    $class_data[] = $avg_record && $avg_record->avg_percent !== null ? round($avg_record->avg_percent, 1) : 0;
-                }
-            }
-        } catch (\Exception $e) {
-            debugging($e->getMessage(), DEBUG_DEVELOPER);
+        foreach ($records as $record) {
+            $fallback = get_string('activityfallback', 'block_performance_graphs', ucfirst($record->itemmodule));
+            $labels[] = format_string($record->itemname ?: $fallback, true, [
+                'context' => $context,
+                'escape' => false,
+            ]);
+            $data[] = round((float) $record->percent, 1);
         }
-        
-        if (empty($labels)) {
-            $labels[] = 'No Grades Found';
-            $data[] = 0;
-            if ($show_average) {
-                $class_data[] = 0;
+
+        $chartdata = self::format_chart_data($labels, $data, $type, get_string('score', 'block_performance_graphs'), true);
+        if ($showaverage && $records && in_array($type, ['bar', 'line', 'area'], true)) {
+            $averages = self::get_item_averages($courseid, array_keys($records));
+            $classdata = [];
+            foreach ($records as $record) {
+                $classdata[] = isset($averages[$record->id])
+                    ? round(((float) $averages[$record->id] / (float) $record->grademax) * 100, 1) : null;
             }
-        }
-        
-        $chart_data = self::format_chart_data($labels, $data, $type, 'Score (%)');
-        
-        if ($show_average && in_array($type, ['bar', 'line', 'area'])) {
-            $chart_data['series'][] = [
-                'name' => 'Class Average',
-                'data' => $class_data,
-                'type' => 'line'
+            $chartdata['series'][] = [
+                'name' => get_string('classaverage', 'block_performance_graphs'),
+                'data' => $classdata,
+                'type' => 'line',
             ];
         }
-        
-        return $chart_data;
+        return $chartdata;
     }
 
-    private static function format_chart_data($labels, $data, $type, $seriesName) {
-        if ($type === 'pie') {
-            return [
-                'series' => array_values($data),
-                'labels' => $labels,
-                'chart' => ['type' => 'pie', 'width' => '100%']
-            ];
-        } else if ($type === 'radial') {
-            $total = array_sum($data);
-            $percentages = [];
-            foreach ($data as $d) {
-                $percentages[] = $total > 0 ? round(($d / $total) * 100) : 0;
-            }
-            // For radial with one main item (like progress), just return first percentage.
-            if (count($percentages) == 2 && ($labels[0] == 'Completed' || $labels[0] == 'Completed Activities')) {
-                return [
-                    'series' => [$percentages[0]],
-                    'labels' => ['Progress'],
-                    'chart' => ['type' => 'radialBar', 'height' => 350]
-                ];
-            }
-            return [
-                'series' => $percentages,
-                'labels' => $labels,
-                'chart' => ['type' => 'radialBar', 'height' => 350]
-            ];
-        } else {
-            return [
-                'series' => [['name' => $seriesName, 'data' => array_values($data)]],
-                'xaxis' => ['categories' => $labels],
-                'chart' => ['type' => 'bar', 'height' => 350]
-            ];
+    /** Return averages for grade items across authorised active students. */
+    private static function get_item_averages(int $courseid, array $itemids): array {
+        global $DB;
+
+        $studentids = array_keys(self::get_available_students($courseid));
+        if (!$studentids || !$itemids) {
+            return [];
         }
+        [$itemsql, $itemparams] = $DB->get_in_or_equal($itemids, SQL_PARAMS_NAMED, 'item');
+        [$studentsql, $studentparams] = $DB->get_in_or_equal($studentids, SQL_PARAMS_NAMED, 'avgstudent');
+        $params = ['courseid' => $courseid] + $itemparams + $studentparams;
+        $visibilitysql = self::get_grade_visibility_sql($params);
+        $records = $DB->get_records_sql(
+            "SELECT gg.itemid, AVG(gg.finalgrade) AS averagegrade
+               FROM {grade_grades} gg
+               JOIN {grade_items} gi ON gi.id = gg.itemid
+              WHERE gg.itemid $itemsql
+                AND gg.userid $studentsql
+                AND gi.courseid = :courseid
+                AND gg.finalgrade IS NOT NULL
+                $visibilitysql
+           GROUP BY gg.itemid",
+            $params
+        );
+        $averages = [];
+        foreach ($records as $record) {
+            $averages[$record->itemid] = $record->averagegrade;
+        }
+        return $averages;
+    }
+
+    /**
+     * Return SQL which excludes grades hidden from the current user.
+     *
+     * @param array $params Query parameters, modified in place.
+     * @return string
+     */
+    private static function get_grade_visibility_sql(array &$params): string {
+        global $USER;
+
+        // Courseid is always supplied by callers.
+        $context = \context_course::instance((int) $params['courseid']);
+        if (has_capability('moodle/grade:viewhidden', $context, $USER)) {
+            return '';
+        }
+        $params['itemvisibleafter'] = time();
+        $params['gradevisibleafter'] = $params['itemvisibleafter'];
+        return "AND (gi.hidden = 0 OR (gi.hidden > 1 AND gi.hidden <= :itemvisibleafter))
+                AND (gg.hidden = 0 OR (gg.hidden > 1 AND gg.hidden <= :gradevisibleafter))";
+    }
+
+    /** Format values for the selected chart type. */
+    private static function format_chart_data(
+        array $labels,
+        array $data,
+        string $type,
+        string $seriesname,
+        bool $valuesarepercent
+    ): array {
+        if (!$labels || !$data) {
+            return self::get_empty_chart($type);
+        }
+        if ($type === 'pie') {
+            return ['series' => array_values($data), 'labels' => $labels, 'series_name' => $seriesname,
+                'chart' => ['type' => 'pie']];
+        }
+        if ($type === 'radial') {
+            if ($valuesarepercent) {
+                $percentages = array_map(static function($value): float {
+                    return max(0, min(100, (float) $value));
+                }, $data);
+            } else {
+                $total = array_sum($data);
+                $percentages = array_map(static function($value) use ($total): float {
+                    return $total > 0 ? round(((float) $value / $total) * 100, 1) : 0;
+                }, $data);
+                if (count($percentages) === 2) {
+                    $percentages = [$percentages[0]];
+                    $labels = [get_string('progress', 'block_performance_graphs')];
+                }
+            }
+            return ['series' => $percentages, 'labels' => $labels, 'series_name' => $seriesname,
+                'chart' => ['type' => 'radialBar']];
+        }
+        return [
+            'series' => [['name' => $seriesname, 'data' => array_values($data)]],
+            'xaxis' => ['categories' => $labels],
+            'chart' => ['type' => $type],
+        ];
     }
 }

@@ -1,16 +1,16 @@
 # Moodle Performance Graphs Block Plugin (`block_performance_graphs`)
 
-An interactive performance analytics and visualization block plugin for Moodle 4.0+. It renders real-time, customizable charts for class-wide progress and individual student performance using ApexCharts.
+An interactive performance analytics and visualization block plugin for Moodle 4.0+. It renders real-time, customisable charts for class-wide progress and individual student performance using a dependency-free SVG renderer.
 
 ---
 
 ## Features
 
 - **Multiple Chart Types**:
-  - **Bar / Column Chart**: Modern gradient bars with optional passing threshold highlighting (red for failing, green for passing).
-  - **Pie / Donut Chart**: Clear breakdown of completion and progress status.
+  - **Bar / Column Chart**: Clear bars with optional passing-threshold highlighting (red for failing, green for passing).
+  - **Pie Chart**: Clear breakdown of completion and progress status.
   - **Radial Bar Chart**: Circular progress meters for course activity completion.
-  - **Line / Area Chart**: Smooth trend tracking for assignment and quiz performance over time.
+  - **Line / Area Chart**: Ordered quiz and assignment performance comparisons.
 
 - **Dual Viewing Modes**:
   - **Class Mode** *(Teachers & Admins)*:
@@ -21,9 +21,9 @@ An interactive performance analytics and visualization block plugin for Moodle 4
     - Individual Assignment & Quiz Scores.
     - **Class Average Overlay**: Compare individual scores against the overall class average line.
 
-- **Dynamic AJAX Filtering**: Select courses, students, and metric types directly within the block without page reloads.
+- **Dynamic Filtering**: Select courses and students directly within the block without page reloads.
 
-- **Responsive & Animated**: Powered by ApexCharts with smooth transitions and responsive layout adaptation.
+- **Responsive & Accessible**: Native SVG charts include text alternatives and an expandable data table.
 
 ---
 
@@ -32,6 +32,8 @@ An interactive performance analytics and visualization block plugin for Moodle 4
 - **Moodle Version**: Moodle 4.0 (2022041900) or higher.
 - **PHP Version**: PHP 7.4 or PHP 8.x.
 - **Browser**: Modern web browser with JavaScript enabled.
+
+Release `0.2.0` removes the ApexCharts dependency and uses a GPL-compatible native SVG renderer.
 
 ---
 
@@ -49,6 +51,7 @@ An interactive performance analytics and visualization block plugin for Moodle 4
    - Log in to your Moodle site as an Administrator.
    - Go to **Site Administration > Notifications**.
    - Complete the database upgrade prompt for `block_performance_graphs`.
+   - Purge Moodle caches so the updated AMD module and styles are loaded.
 
 3. **Add Block to a Page**:
    - Turn editing on on your Moodle Course page or Dashboard.
@@ -65,8 +68,8 @@ Edit the block instance settings to customize the display:
 | **Target Mode** | Choose between `Class Level` (Overall) or `Student Level` (Individual). |
 | **Chart Type** | Select `Bar`, `Pie`, `Radial Bar`, `Line`, or `Area`. |
 | **Metric** | Choose between Completion Rates or Quiz/Assignment Scores. |
-| **Chart Color** | Set your preferred primary color hex code (e.g. `#008FFB`). |
-| **Passing Threshold** | Highlight scores dynamically: values below threshold render in red (`#FF4560`) and passing grades in green (`#00E396`). |
+| **Chart Colour** | Choose the primary chart colour. |
+| **Passing Threshold** | Highlight scores dynamically: values below the threshold render in red and passing grades in green. |
 | **Show Class Average** | Overlay class average trend line on student score charts. |
 
 ---
@@ -78,16 +81,22 @@ block_performance_graphs/
 ├── ajax.php                 # AJAX endpoint for live chart filter updates
 ├── block_performance_graphs.php # Main block class implementation
 ├── edit_form.php            # Block configuration form definition
+├── styles.css               # Block and chart presentation
 ├── version.php             # Moodle plugin metadata and version requirements
-├── amd/                    # AMD JS modules (ApexCharts loader & renderer)
+├── amd/                    # Dependency-free AMD chart renderer
 │   ├── src/
 │   └── build/
 ├── classes/
 │   ├── data_provider.php    # Data querying & chart payload formatter
 │   └── privacy/provider.php # Moodle GDPR privacy API compliance provider
+├── db/
+│   └── access.php           # Block capabilities
 ├── lang/
 │   └── en/                 # English language strings
 ├── pix/                    # Block icon (SVG)
+├── tests/                  # PHPUnit regression tests
+├── CHANGES.md              # Release history
+├── LICENSE                 # GPL licensing notice
 └── templates/
     └── chart.mustache       # Mustache template for chart container
 ```
@@ -96,7 +105,25 @@ block_performance_graphs/
 
 ## Privacy & GDPR
 
-This plugin implements Moodle's Privacy API (`\core_privacy\local\metadata\null_provider`), confirming that it reads grade and completion data to display graphs but stores no personal data directly in additional plugin database tables.
+This plugin implements Moodle's Privacy API (`\core_privacy\local\metadata\null_provider`). It reads existing grade and completion data but does not store personal data in plugin tables or external services.
+
+Grade data is restricted using Moodle course access, enrolment, capability, hidden-grade and separate-group rules.
+
+The block stores no additional grade, completion or user records.
+
+---
+
+## Development
+
+Run the available checks from the plugin directory:
+
+```bash
+php -l ajax.php
+node --check amd/src/chart.js
+git diff --check
+```
+
+The PHPUnit tests require a configured Moodle checkout and are located in `tests/`.
 
 ---
 
