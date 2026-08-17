@@ -1,6 +1,6 @@
 # Moodle Performance Graphs Block Plugin (`block_performance_graphs`)
 
-An interactive performance analytics and visualization block plugin for Moodle 4.0+. It renders real-time, customisable charts for class-wide progress and individual student performance using a dependency-free SVG renderer.
+An interactive performance analytics and visualization block plugin for Moodle 4.0+. It renders real-time, customisable charts for class-wide progress and individual student performance using Moodle's bundled Chart.js integration.
 
 ---
 
@@ -23,7 +23,7 @@ An interactive performance analytics and visualization block plugin for Moodle 4
 
 - **Dynamic Filtering**: Select courses and students directly within the block without page reloads.
 
-- **Responsive & Accessible**: Native SVG charts include text alternatives and an expandable data table.
+- **Responsive & Accessible**: Interactive Chart.js charts include ARIA labels, reduced-motion support and an expandable data table.
 
 ---
 
@@ -33,7 +33,7 @@ An interactive performance analytics and visualization block plugin for Moodle 4
 - **PHP Version**: PHP 7.4 or PHP 8.x.
 - **Browser**: Modern web browser with JavaScript enabled.
 
-Release `0.2.0` removes the ApexCharts dependency and uses a GPL-compatible native SVG renderer.
+Release `0.3.0` uses Moodle's bundled MIT-licensed Chart.js integration. No CDN request or duplicate Chart.js copy is required.
 
 ---
 
@@ -83,7 +83,7 @@ block_performance_graphs/
 ├── edit_form.php            # Block configuration form definition
 ├── styles.css               # Block and chart presentation
 ├── version.php             # Moodle plugin metadata and version requirements
-├── amd/                    # Dependency-free AMD chart renderer
+├── amd/                    # AMD Chart.js adapter and generated module
 │   ├── src/
 │   └── build/
 ├── classes/
@@ -136,3 +136,5 @@ Contributions, bug reports, and feature requests are welcome. Feel free to open 
 ## License
 
 This plugin is licensed under the [GNU General Public License v3.0](https://www.gnu.org/licenses/gpl-3.0.html) or later.
+
+Chart rendering uses the Chart.js library supplied by Moodle core. Chart.js is licensed under the [MIT License](https://github.com/chartjs/Chart.js/blob/master/LICENSE.md); this plugin does not redistribute a separate Chart.js copy.

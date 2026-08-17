@@ -1,477 +1,142 @@
 // This file is part of Moodle - http://moodle.org/.
-//
-// Moodle is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+// Moodle is free software: you can redistribute it and/or modify it under the terms of the GNU GPL.
 
 /**
- * Accessible, dependency-free chart renderer for the Performance Graphs block.
- *
- * @module     block_performance_graphs/chart
- * @copyright  2026 Ahmet Bülbül
- * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * Chart.js renderer for the Performance Graphs block.
+ * @module block_performance_graphs/chart
+ * @copyright 2026 Ahmet Bülbül
+ * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
-define(['core/notification'], function(Notification) {
+define(['core/chartjs', 'core/notification'], function(Chart, Notification) {
     'use strict';
 
-    var SVG_NS = 'http://www.w3.org/2000/svg';
-    var DEFAULT_COLORS = ['#0f6cbf', '#198754', '#ffc107', '#dc3545', '#6f42c1'];
-
-    var svgElement = function(name, attributes) {
-        var element = document.createElementNS(SVG_NS, name);
-        Object.keys(attributes || {}).forEach(function(key) {
-            element.setAttribute(key, String(attributes[key]));
-        });
-        return element;
+    var instances = Object.create(null);
+    var defaultColors = ['#0f6cbf', '#198754', '#ffc107', '#dc3545', '#6f42c1'];
+    var centerTextPlugin = {
+        id: 'performanceGraphsCenterText',
+        afterDraw: function(chart) {
+            if (chart.config.type !== 'doughnut' || !chart.data.datasets.length || !chart.data.datasets[0].data.length) {
+                return;
+            }
+            var value = chart.data.datasets[0].data[0];
+            var area = chart.chartArea;
+            var context = chart.ctx;
+            context.save();
+            context.fillStyle = window.getComputedStyle(chart.canvas).color || '#212529';
+            context.font = '600 1.7rem sans-serif';
+            context.textAlign = 'center';
+            context.textBaseline = 'middle';
+            context.fillText(Math.round(value) + '%', (area.left + area.right) / 2, (area.top + area.bottom) / 2);
+            context.restore();
+        }
     };
-
-    var appendText = function(parent, text, attributes) {
-        var element = svgElement('text', attributes || {});
-        element.textContent = String(text);
-        parent.appendChild(element);
-        return element;
-    };
-
-    var normaliseLabel = function(label) {
-        return Array.isArray(label) ? label.join(' ') : String(label || '');
-    };
-
     var getLabels = function(options) {
-        if (Array.isArray(options.labels)) {
-            return options.labels.map(normaliseLabel);
-        }
-        var categories = options.xaxis && Array.isArray(options.xaxis.categories) ? options.xaxis.categories : [];
-        return categories.map(normaliseLabel);
+        var labels = Array.isArray(options.labels) ? options.labels :
+            (options.xaxis && Array.isArray(options.xaxis.categories) ? options.xaxis.categories : []);
+        return labels.map(function(label) { return Array.isArray(label) ? label.join(' ') : String(label || ''); });
     };
-
     var getSeries = function(options) {
-        if (!Array.isArray(options.series)) {
-            return [];
-        }
+        if (!Array.isArray(options.series)) { return []; }
         if (options.series.length && typeof options.series[0] === 'number') {
             return [{name: options.series_name || '', data: options.series}];
         }
         return options.series.map(function(series) {
-            return {
-                name: series.name || '',
-                data: Array.isArray(series.data) ? series.data.map(function(value) {
-                    return value === null ? null : Number(value);
-                }) : [],
-                type: series.type || null
-            };
+            return {name: series.name || '', data: Array.isArray(series.data) ? series.data.map(function(value) {
+                return value === null ? null : Number(value);
+            }) : [], type: series.type || null};
         });
     };
-
     var getColors = function(options) {
-        return Array.isArray(options.colors) && options.colors.length ? options.colors : DEFAULT_COLORS;
+        return Array.isArray(options.colors) && options.colors.length ? options.colors : defaultColors;
     };
-
-    var renderCallout = function(container, options, elementId) {
+    var destroy = function(id) {
+        if (instances[id]) { instances[id].destroy(); delete instances[id]; }
+    };
+    var theme = function(container) {
+        var style = window.getComputedStyle(container);
+        return {text: style.getPropertyValue('--bs-body-color').trim() || '#212529',
+            muted: style.getPropertyValue('--bs-secondary-color').trim() || '#6c757d',
+            grid: style.getPropertyValue('--bs-border-color').trim() || '#dee2e6'};
+    };
+    var renderCallout = function(container, options, id) {
         var callout = container.parentElement.querySelector('.chart-stat-callout');
-        if (!callout) {
-            return;
-        }
-        if (!options._stat_callout) {
-            callout.hidden = true;
-            return;
-        }
-        document.getElementById(elementId + '-stat').textContent = options._stat_callout.value;
-        document.getElementById(elementId + '-stat-label').textContent = options._stat_callout.label;
+        if (!callout) { return; }
+        if (!options._stat_callout) { callout.hidden = true; return; }
+        document.getElementById(id + '-stat').textContent = options._stat_callout.value;
+        document.getElementById(id + '-stat-label').textContent = options._stat_callout.label;
         callout.hidden = false;
     };
-
-    var renderTitle = function(container, options) {
-        if (!options.title || !options.title.text) {
-            return;
-        }
-        var heading = document.createElement('h4');
-        heading.className = 'chart-title';
-        heading.textContent = options.title.text;
-        container.appendChild(heading);
-    };
-
-    var renderNoData = function(container, options) {
-        var message = document.createElement('p');
-        message.className = 'chart-no-data';
-        message.textContent = options.no_data_text || 'No data available';
-        container.appendChild(message);
-    };
-
     var renderTable = function(container, labels, series, options) {
-        var details = document.createElement('details');
-        details.className = 'chart-data';
-        var summary = document.createElement('summary');
-        summary.textContent = options.table_summary || 'View chart data';
+        var details = document.createElement('details'); details.className = 'chart-data';
+        var summary = document.createElement('summary'); summary.textContent = options.table_summary || 'View chart data';
         details.appendChild(summary);
-
-        var table = document.createElement('table');
-        table.className = 'table table-sm';
-        var caption = document.createElement('caption');
-        caption.textContent = options.table_caption || 'Chart data';
-        table.appendChild(caption);
-
-        var head = document.createElement('thead');
-        var headrow = document.createElement('tr');
-        var labelhead = document.createElement('th');
-        labelhead.scope = 'col';
-        labelhead.textContent = options.category_label || 'Category';
-        headrow.appendChild(labelhead);
-        series.forEach(function(item) {
-            var cell = document.createElement('th');
-            cell.scope = 'col';
-            cell.textContent = item.name || options.value_label || 'Value';
-            headrow.appendChild(cell);
-        });
-        head.appendChild(headrow);
-        table.appendChild(head);
-
+        var table = document.createElement('table'); table.className = 'table table-sm';
+        var caption = document.createElement('caption'); caption.textContent = options.table_caption || 'Chart data'; table.appendChild(caption);
+        var head = document.createElement('thead'); var row = document.createElement('tr');
+        var label = document.createElement('th'); label.scope = 'col'; label.textContent = options.category_label || 'Category'; row.appendChild(label);
+        series.forEach(function(item) { var cell = document.createElement('th'); cell.scope = 'col'; cell.textContent = item.name || options.value_label || 'Value'; row.appendChild(cell); });
+        head.appendChild(row); table.appendChild(head);
         var body = document.createElement('tbody');
-        labels.forEach(function(label, index) {
-            var row = document.createElement('tr');
-            var labelcell = document.createElement('th');
-            labelcell.scope = 'row';
-            labelcell.textContent = label;
-            row.appendChild(labelcell);
-            series.forEach(function(item) {
-                var cell = document.createElement('td');
-                cell.textContent = Number.isFinite(item.data[index]) ? item.data[index] : '';
-                row.appendChild(cell);
-            });
-            body.appendChild(row);
+        labels.forEach(function(labeltext, index) {
+            var bodyrow = document.createElement('tr'); var labelcell = document.createElement('th'); labelcell.scope = 'row'; labelcell.textContent = labeltext; bodyrow.appendChild(labelcell);
+            series.forEach(function(item) { var cell = document.createElement('td'); cell.textContent = Number.isFinite(item.data[index]) ? item.data[index] : ''; bodyrow.appendChild(cell); });
+            body.appendChild(bodyrow);
         });
-        table.appendChild(body);
-        details.appendChild(table);
-        container.appendChild(details);
+        table.appendChild(body); details.appendChild(table); container.appendChild(details);
     };
-
-    var addAxes = function(svg, max, labels, dimensions) {
-        var left = dimensions.left;
-        var top = dimensions.top;
-        var width = dimensions.width;
-        var height = dimensions.height;
-        svg.appendChild(svgElement('line', {x1: left, y1: top, x2: left, y2: top + height, stroke: '#6c757d'}));
-        svg.appendChild(svgElement('line', {
-            x1: left,
-            y1: top + height,
-            x2: left + width,
-            y2: top + height,
-            stroke: '#6c757d'
-        }));
-
-        [0, 25, 50, 75, 100].forEach(function(percent) {
-            var y = top + height - (height * percent / 100);
-            svg.appendChild(svgElement('line', {
-                x1: left,
-                y1: y,
-                x2: left + width,
-                y2: y,
-                stroke: '#e9ecef'
-            }));
-            appendText(svg, Math.round(max * percent / 100), {
-                x: left - 8,
-                y: y + 4,
-                'text-anchor': 'end',
-                'font-size': 11,
-                fill: '#495057'
-            });
-        });
-
-        var step = width / Math.max(labels.length, 1);
-        labels.forEach(function(label, index) {
-            appendText(svg, label.length > 18 ? label.substring(0, 17) + '…' : label, {
-                x: left + step * (index + 0.5),
-                y: top + height + 22,
-                'text-anchor': 'middle',
-                'font-size': 11,
-                fill: '#495057'
-            });
-        });
-    };
-
-    var renderCartesian = function(container, labels, series, options, type) {
-        var svg = svgElement('svg', {
-            viewBox: '0 0 760 390',
-            role: 'img',
-            'aria-label': options.chart_aria_label || 'Performance chart',
-            class: 'performance-graph-svg'
-        });
-        var dimensions = {left: 55, top: 20, width: 675, height: 310};
-        var values = [];
-        series.forEach(function(item) {
-            values = values.concat(item.data.filter(Number.isFinite));
-        });
-        var max = Math.max(100, Math.ceil(Math.max.apply(null, values.concat([0])) / 10) * 10);
-        addAxes(svg, max, labels, dimensions);
-        var colors = getColors(options);
-        var step = dimensions.width / Math.max(labels.length, 1);
-
-        if (type === 'bar') {
-            var barseries = series.filter(function(item) {
-                return item.type !== 'line';
-            });
-            var barwidth = Math.min(48, step * 0.72 / Math.max(barseries.length, 1));
-            barseries.forEach(function(item, seriesindex) {
-                item.data.forEach(function(value, index) {
-                    if (!Number.isFinite(value)) {
-                        return;
-                    }
-                    var height = dimensions.height * Math.max(0, value) / max;
-                    var x = dimensions.left + step * (index + 0.5) -
-                        (barwidth * barseries.length / 2) + barwidth * seriesindex;
-                    var color = colors[seriesindex % colors.length];
-                    if (options.threshold && barseries.length === 1) {
-                        color = value >= options.threshold.value ? options.threshold.pass_color : options.threshold.fail_color;
-                    }
-                    var rect = svgElement('rect', {
-                        x: x,
-                        y: dimensions.top + dimensions.height - height,
-                        width: Math.max(1, barwidth - 2),
-                        height: height,
-                        fill: color,
-                        rx: 4
-                    });
-                    var title = svgElement('title');
-                    title.textContent = labels[index] + ': ' + value;
-                    rect.appendChild(title);
-                    svg.appendChild(rect);
-                });
-            });
-        }
-
-        series.forEach(function(item, seriesindex) {
-            if (type === 'bar' && item.type !== 'line') {
-                return;
-            }
-            var points = [];
-            item.data.forEach(function(value, index) {
-                if (Number.isFinite(value)) {
-                    points.push([
-                        dimensions.left + step * (index + 0.5),
-                        dimensions.top + dimensions.height - dimensions.height * Math.max(0, value) / max
-                    ]);
-                }
-            });
-            if (!points.length) {
-                return;
-            }
-            var pointstring = points.map(function(point) {
-                return point.join(',');
-            }).join(' ');
-            if (type === 'area') {
-                var basey = dimensions.top + dimensions.height;
-                var polygonpoints = points[0][0] + ',' + basey + ' ' + pointstring + ' ' +
-                    points[points.length - 1][0] + ',' + basey;
-                svg.appendChild(svgElement('polygon', {
-                    points: polygonpoints,
-                    fill: colors[seriesindex % colors.length],
-                    opacity: 0.2
-                }));
-            }
-            svg.appendChild(svgElement('polyline', {
-                points: pointstring,
-                fill: 'none',
-                stroke: colors[seriesindex % colors.length],
-                'stroke-width': 3
-            }));
-            points.forEach(function(point) {
-                svg.appendChild(svgElement('circle', {
-                    cx: point[0], cy: point[1], r: 4, fill: colors[seriesindex % colors.length]
-                }));
-            });
-        });
-        container.appendChild(svg);
-    };
-
-    var polarPoint = function(cx, cy, radius, angle) {
-        var radians = (angle - 90) * Math.PI / 180;
-        return {x: cx + radius * Math.cos(radians), y: cy + radius * Math.sin(radians)};
-    };
-
-    var arcPath = function(cx, cy, radius, startangle, endangle) {
-        var start = polarPoint(cx, cy, radius, endangle);
-        var end = polarPoint(cx, cy, radius, startangle);
-        var largearc = endangle - startangle <= 180 ? 0 : 1;
-        return ['M', start.x, start.y, 'A', radius, radius, 0, largearc, 0, end.x, end.y].join(' ');
-    };
-
-    var renderPie = function(container, labels, series, options) {
-        var values = series[0].data;
-        var total = values.reduce(function(sum, value) {
-            return sum + Math.max(0, value || 0);
-        }, 0);
-        if (!total) {
-            renderNoData(container, options);
-            return;
-        }
-        var svg = svgElement('svg', {
-            viewBox: '0 0 760 360',
-            role: 'img',
-            'aria-label': options.chart_aria_label || 'Performance chart',
-            class: 'performance-graph-svg'
-        });
-        var colors = getColors(options);
-        var angle = 0;
-        values.forEach(function(value, index) {
-            var sweep = 360 * Math.max(0, value) / total;
-            var path;
-            if (sweep >= 359.999) {
-                path = svgElement('circle', {cx: 250, cy: 170, r: 130, fill: colors[index % colors.length]});
-            } else {
-                var start = polarPoint(250, 170, 130, angle);
-                var end = polarPoint(250, 170, 130, angle + sweep);
-                path = svgElement('path', {
-                    d: ['M', 250, 170, 'L', start.x, start.y, 'A', 130, 130, 0,
-                        sweep > 180 ? 1 : 0, 1, end.x, end.y, 'Z'].join(' '),
-                    fill: colors[index % colors.length]
-                });
-            }
-            var title = svgElement('title');
-            title.textContent = labels[index] + ': ' + value;
-            path.appendChild(title);
-            svg.appendChild(path);
-            angle += sweep;
-        });
-        labels.forEach(function(label, index) {
-            svg.appendChild(svgElement('rect', {x: 460, y: 80 + index * 28, width: 16, height: 16,
-                fill: colors[index % colors.length]}));
-            appendText(svg, label + ': ' + values[index], {x: 486, y: 93 + index * 28, 'font-size': 13});
-        });
-        container.appendChild(svg);
-    };
-
-    var renderRadial = function(container, labels, series, options) {
-        var values = series[0].data;
-        var svg = svgElement('svg', {
-            viewBox: '0 0 760 360',
-            role: 'img',
-            'aria-label': options.chart_aria_label || 'Performance chart',
-            class: 'performance-graph-svg'
-        });
-        var colors = getColors(options);
-        values.forEach(function(rawvalue, index) {
-            var value = Math.max(0, Math.min(100, Number(rawvalue) || 0));
-            var radius = 120 - index * 26;
-            svg.appendChild(svgElement('circle', {
-                cx: 300, cy: 170, r: radius, fill: 'none', stroke: '#e9ecef', 'stroke-width': 18
-            }));
-            if (value > 0) {
-                svg.appendChild(svgElement('path', {
-                    d: arcPath(300, 170, radius, 0, Math.min(359.99, value * 3.6)),
-                    fill: 'none', stroke: colors[index % colors.length], 'stroke-width': 18,
-                    'stroke-linecap': 'round'
-                }));
-            }
-            appendText(svg, (labels[index] || '') + ': ' + value + '%', {
-                x: 470, y: 120 + index * 28, 'font-size': 14
-            });
-        });
-        container.appendChild(svg);
-    };
-
-    var render = function(container, options, elementId) {
-        container.replaceChildren();
-        renderCallout(container, options, elementId);
-        renderTitle(container, options);
-        var labels = getLabels(options);
-        var series = getSeries(options);
-        if (!series.length || !series.some(function(item) {
-            return item.data.length;
-        })) {
-            renderNoData(container, options);
-            return;
-        }
-        var type = options.chart && options.chart.type ? options.chart.type : 'bar';
+    var datasets = function(type, labels, series, options, colors) {
         if (type === 'pie') {
-            renderPie(container, labels, series, options);
-        } else if (type === 'radialBar') {
-            renderRadial(container, labels, series, options);
-        } else {
-            renderCartesian(container, labels, series, options, type);
+            return [{label: series[0].name, data: series[0].data, backgroundColor: labels.map(function(_, i) { return colors[i % colors.length]; }), borderColor: 'transparent', borderWidth: 3, hoverOffset: 8}];
         }
-        renderTable(container, labels, series, options);
-    };
-
-    var setLoading = function(elementId, loading) {
-        var loader = document.getElementById(elementId + '-loading');
-        if (loader) {
-            loader.hidden = !loading;
-        }
-    };
-
-    var replaceStudents = function(select, students) {
-        var current = select.value;
-        select.replaceChildren();
-        students.forEach(function(student) {
-            var option = document.createElement('option');
-            option.value = student.id;
-            option.textContent = student.name;
-            option.selected = String(student.id) === String(current);
-            select.appendChild(option);
-        });
-        return Array.from(select.options).some(function(option) {
-            return option.selected;
+        return series.map(function(item, seriesIndex) {
+            var color = colors[seriesIndex % colors.length]; var line = type !== 'bar' || item.type === 'line';
+            var points = item.data.map(function(value) {
+                if (options.threshold && type === 'bar' && series.length === 1 && Number.isFinite(value)) {
+                    return value >= options.threshold.value ? options.threshold.pass_color : options.threshold.fail_color;
+                }
+                return color;
+            });
+            return {label: item.name, data: item.data, backgroundColor: line ? (type === 'area' && !item.type ? color + '33' : color) : points,
+                borderColor: line ? color : points, borderWidth: line ? 3 : 0, borderRadius: type === 'bar' ? 7 : 0,
+                borderSkipped: false, pointRadius: line ? 4 : 0, pointHoverRadius: line ? 6 : 0, pointBackgroundColor: points,
+                tension: type === 'line' || type === 'area' ? 0.35 : 0, fill: type === 'area' && !item.type,
+                spanGaps: true, order: item.type === 'line' ? 0 : 1};
         });
     };
-
-    var init = function(elementId, initialOptions) {
-        var container = document.getElementById(elementId);
-        if (!container) {
-            return;
+    var config = function(container, options, labels, series) {
+        var requested = options.chart && options.chart.type ? options.chart.type : 'bar';
+        var type = requested === 'radialBar' ? 'doughnut' : requested; var colors = getColors(options); var colorset = theme(container);
+        var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        var result = {type: type, data: {labels: labels, datasets: datasets(requested === 'radialBar' ? 'pie' : requested, labels, series, options, colors)}, plugins: [centerTextPlugin], options: {
+            responsive: true, maintainAspectRatio: false, normalized: true,
+            animation: reduced ? false : {duration: 650, easing: 'easeOutQuart'},
+            plugins: {legend: {display: requested !== 'bar' || series.length > 1, position: 'bottom', labels: {color: colorset.text, usePointStyle: true, padding: 18}}, tooltip: {enabled: true, intersect: false, mode: 'index'}},
+            scales: type === 'doughnut' || type === 'pie' ? {} : {x: {ticks: {color: colorset.muted, maxRotation: 0, autoSkip: true}, grid: {display: false}}, y: {beginAtZero: true, suggestedMax: 100, ticks: {color: colorset.muted}, grid: {color: colorset.grid}}}
+        }};
+        if (requested === 'radialBar') {
+            result.options.cutout = '72%'; result.options.rotation = -90; result.options.circumference = 360;
+            result.data.datasets = series.map(function(item, i) { var value = Math.max(0, Math.min(100, Number(item.data[0]) || 0)); return {label: labels[i] || item.name, data: [value, 100 - value], backgroundColor: [colors[i % colors.length], colorset.grid], borderWidth: 0, weight: 1}; });
         }
-        var options = typeof initialOptions === 'string' ? JSON.parse(initialOptions) : initialOptions;
-        render(container, options || {}, elementId);
-
-        var filters = container.parentElement.querySelector('.chart-filters');
-        var courseSelect = document.getElementById(elementId + '-course-select');
-        var studentSelect = document.getElementById(elementId + '-student-select');
-        if (!filters) {
-            return;
-        }
-
-        var update = function() {
-            setLoading(elementId, true);
-            var data = new URLSearchParams({
-                sesskey: M.cfg.sesskey,
-                blockid: filters.dataset.blockid,
-                courseid: courseSelect ? courseSelect.value : filters.dataset.courseid,
-                studentid: studentSelect ? studentSelect.value : 0
-            });
-            fetch(M.cfg.wwwroot + '/blocks/performance_graphs/ajax.php', {
-                method: 'POST',
-                credentials: 'same-origin',
-                headers: {'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'},
-                body: data.toString()
-            }).then(function(response) {
-                if (!response.ok) {
-                    throw new Error('HTTP ' + response.status);
-                }
-                return response.json();
-            }).then(function(response) {
-                if (response.error) {
-                    throw new Error(response.message || 'Unable to load chart data');
-                }
-                if (response._students && studentSelect) {
-                    var hadSelection = replaceStudents(studentSelect, response._students);
-                    if (!hadSelection && studentSelect.options.length) {
-                        studentSelect.selectedIndex = 0;
-                    }
-                }
-                render(container, response, elementId);
-                setLoading(elementId, false);
-            }).catch(function(error) {
-                setLoading(elementId, false);
-                Notification.exception(error);
-            });
+        return result;
+    };
+    var render = function(container, options, id) {
+        destroy(id); container.replaceChildren(); renderCallout(container, options, id);
+        var labels = getLabels(options); var series = getSeries(options);
+        if (!series.length || !series.some(function(item) { return item.data.length; })) { var empty = document.createElement('p'); empty.className = 'chart-no-data'; empty.textContent = options.no_data_text || 'No data available'; container.appendChild(empty); return; }
+        var title = document.createElement('h4'); title.className = 'chart-title'; title.textContent = options.title && options.title.text ? options.title.text : ''; title.hidden = !title.textContent; container.appendChild(title);
+        var stage = document.createElement('div'); stage.className = 'performance-graph-stage'; var canvas = document.createElement('canvas'); canvas.className = 'performance-graph-canvas'; canvas.setAttribute('role', 'img'); canvas.setAttribute('aria-label', options.chart_aria_label || 'Performance chart'); stage.appendChild(canvas); container.appendChild(stage);
+        instances[id] = new Chart(canvas.getContext('2d'), config(container, options, labels, series)); renderTable(container, labels, series, options);
+    };
+    var loading = function(id, value) { var loader = document.getElementById(id + '-loading'); if (loader) { loader.hidden = !value; } };
+    var replaceStudents = function(select, students) { var current = select.value; select.replaceChildren(); students.forEach(function(student) { var option = document.createElement('option'); option.value = student.id; option.textContent = student.name; option.selected = String(student.id) === String(current); select.appendChild(option); }); return Array.from(select.options).some(function(option) { return option.selected; }); };
+    var init = function(id, initialOptions) {
+        var container = document.getElementById(id); if (!container) { return; }
+        var options = typeof initialOptions === 'string' ? JSON.parse(initialOptions) : initialOptions; render(container, options || {}, id);
+        var filters = container.parentElement.querySelector('.chart-filters'); var course = document.getElementById(id + '-course-select'); var student = document.getElementById(id + '-student-select'); if (!filters) { return; }
+        var update = function() { loading(id, true); var data = new URLSearchParams({sesskey: M.cfg.sesskey, blockid: filters.dataset.blockid, courseid: course ? course.value : filters.dataset.courseid, studentid: student ? student.value : 0});
+            fetch(M.cfg.wwwroot + '/blocks/performance_graphs/ajax.php', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'}, body: data.toString()}).then(function(response) { if (!response.ok) { throw new Error('HTTP ' + response.status); } return response.json(); }).then(function(response) { if (response.error) { throw new Error(response.message || 'Unable to load chart data'); } if (response._students && student) { if (!replaceStudents(student, response._students) && student.options.length) { student.selectedIndex = 0; } } render(container, response, id); loading(id, false); }).catch(function(error) { loading(id, false); Notification.exception(error); });
         };
-
-        if (courseSelect) {
-            courseSelect.addEventListener('change', update);
-        }
-        if (studentSelect) {
-            studentSelect.addEventListener('change', update);
-        }
+        if (course) { course.addEventListener('change', update); } if (student) { student.addEventListener('change', update); }
     };
-
     return {init: init};
 });
