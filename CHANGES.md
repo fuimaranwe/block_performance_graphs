@@ -1,5 +1,9 @@
 # Change log
 
+## 0.3.3 - 2026-08-18
+
+- Fixed course and student dropdown change handlers after the chart loading wrapper was introduced.
+
 ## 0.3.2 - 2026-08-18
 
 - Expanded compatibility from Moodle 5.2.2 to the complete Moodle 5.2.x branch.

@@ -324,7 +324,8 @@ define(['core/chartjs', 'core/notification'], function(Chart, Notification) {
         }
         var options = typeof initialOptions === 'string' ? JSON.parse(initialOptions) : initialOptions;
         render(container, options || {}, id);
-        var filters = container.parentElement.querySelector('.chart-filters');
+        var card = container.closest('.block-performance-graphs-card');
+        var filters = card ? card.querySelector('.chart-filters') : null;
         var course = document.getElementById(id + '-course-select');
         var student = document.getElementById(id + '-student-select');
         if (!filters) {

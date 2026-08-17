@@ -33,7 +33,7 @@ An interactive performance analytics and visualization block plugin for Moodle 5
 - **PHP Version**: PHP 8.3 or PHP 8.4, matching Moodle 5.2 requirements.
 - **Browser**: Modern web browser with JavaScript enabled.
 
-Release `0.3.2` supports the Moodle 5.2.x branch and uses its bundled Chart.js 4.5.1 integration. No CDN request or duplicate Chart.js copy is required.
+Release `0.3.3` supports the Moodle 5.2.x branch and uses its bundled Chart.js 4.5.1 integration. No CDN request or duplicate Chart.js copy is required.
 
 ---
 
