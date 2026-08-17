@@ -33,14 +33,26 @@
     position: relative;
 }
 
+.block-performance-graphs-card .performance-graph-region {
+    position: relative;
+}
+
 .block-performance-graphs-card .performance-graph-stage {
     height: 22rem;
     position: relative;
     width: 100%;
 }
 
-.block-performance-graphs-card .performance-graph-canvas { display: block; height: 100% !important; width: 100% !important; }
-.block-performance-graphs-card .chart-title { font-size: 1rem; margin-bottom: .75rem; }
+.block-performance-graphs-card .performance-graph-canvas {
+    display: block;
+    height: 100% !important;
+    width: 100% !important;
+}
+
+.block-performance-graphs-card .chart-title {
+    font-size: 1rem;
+    margin-bottom: .75rem;
+}
 
 .block-performance-graphs-card .chart-loading {
     background: var(--bs-body-bg, #fff);
@@ -54,12 +66,19 @@
 }
 
 @media (max-width: 576px) {
-    .block-performance-graphs-card { padding: .875rem; }
-    .block-performance-graphs-card .performance-graph-stage { height: 18rem; }
+    .block-performance-graphs-card {
+        padding: .875rem;
+    }
+
+    .block-performance-graphs-card .performance-graph-stage {
+        height: 18rem;
+    }
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .block-performance-graphs-card * { transition: none !important; }
+    .block-performance-graphs-card * {
+        transition: none !important;
+    }
 }
 
 .block-performance-graphs-card .chart-data {
@@ -74,4 +93,9 @@
 .block-performance-graphs-card .chart-no-data {
     padding: 3rem 1rem;
     text-align: center;
+}
+
+.block-performance-graphs-card .chart-error {
+    color: var(--bs-danger-text-emphasis, #842029);
+    padding: .75rem 0 0;
 }

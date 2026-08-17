@@ -44,4 +44,16 @@ final class data_provider_test extends \advanced_testcase {
 
         $this->assertSame('30%', $chartdata['_stat_callout']['value']);
     }
+
+    /** Radial score charts must retain every percentage for concentric rings. */
+    public function test_radial_chart_preserves_all_percentages(): void {
+        $method = new \ReflectionMethod(data_provider::class, 'format_chart_data');
+        $method->setAccessible(true);
+
+        $result = $method->invoke(null, ['Quiz', 'Assignment'], [75, 82.5], 'radial', 'Score', true);
+
+        $this->assertSame('radialBar', $result['chart']['type']);
+        $this->assertSame([75.0, 82.5], $result['series']);
+        $this->assertSame(['Quiz', 'Assignment'], $result['labels']);
+    }
 }

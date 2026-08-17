@@ -1,6 +1,6 @@
 # Moodle Performance Graphs Block Plugin (`block_performance_graphs`)
 
-An interactive performance analytics and visualization block plugin for Moodle 4.0+. It renders real-time, customisable charts for class-wide progress and individual student performance using Moodle's bundled Chart.js integration.
+An interactive performance analytics and visualization block plugin for Moodle 5.2.2. It renders real-time, customisable charts for class-wide progress and individual student performance using Moodle's bundled Chart.js integration.
 
 ---
 
@@ -29,20 +29,20 @@ An interactive performance analytics and visualization block plugin for Moodle 4
 
 ## Requirements
 
-- **Moodle Version**: Moodle 4.0 (2022041900) or higher.
-- **PHP Version**: PHP 7.4 or PHP 8.x.
+- **Moodle Version**: Moodle 5.2.2 (2026042002.00).
+- **PHP Version**: PHP 8.3 or PHP 8.4, matching Moodle 5.2 requirements.
 - **Browser**: Modern web browser with JavaScript enabled.
 
-Release `0.3.0` uses Moodle's bundled MIT-licensed Chart.js integration. No CDN request or duplicate Chart.js copy is required.
+Release `0.3.1` targets Moodle 5.2.2 and uses its bundled Chart.js 4.5.1 integration. No CDN request or duplicate Chart.js copy is required.
 
 ---
 
 ## Installation
 
 1. **Download / Clone**:
-   Clone or extract this repository into your Moodle installation's `blocks/` directory:
+   Clone or extract this repository into your Moodle installation's `public/blocks/` directory:
    ```bash
-   cd /path/to/moodle/blocks
+   cd /path/to/moodle/public/blocks
    git clone https://github.com/fuimaranwe/block_performance_graphs.git performance_graphs
    ```
    *(Ensure the directory name is `performance_graphs`)*

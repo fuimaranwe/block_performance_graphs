@@ -1,5 +1,12 @@
 # Change log
 
+## 0.3.1 - 2026-08-17
+
+- Targeted Moodle 5.2.2 and its bundled Chart.js 4.5.1 API.
+- Corrected multi-value radial rings and the class-average line overlay.
+- Added theme-aware area gradients and a contained loading overlay.
+- Added a localised accessible AJAX error state while preserving the last valid chart.
+
 ## 0.3.0 - 2026-08-17
 
 - Replaced the native SVG renderer with Moodle core's MIT-licensed Chart.js integration.

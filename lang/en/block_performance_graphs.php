@@ -32,6 +32,7 @@ $string['invalidcourse'] = 'You cannot access this course.';
 $string['invalidstudent'] = 'You cannot view grades for this student.';
 $string['invalidthreshold'] = 'The passing-grade threshold must be between 0 and 100.';
 $string['loading'] = 'Loading chart data…';
+$string['loaderror'] = 'Unable to load chart data. The previous chart is still displayed.';
 $string['metricactivitycompletion'] = 'Activity completion progress';
 $string['metricallscores'] = 'Quiz and assignment scores';
 $string['metriccompletion'] = 'General completion rate';

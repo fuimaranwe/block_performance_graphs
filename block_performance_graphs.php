@@ -101,6 +101,7 @@ class block_performance_graphs extends block_base {
             'course_label' => get_string('course'),
             'student_label' => get_string('student', 'block_performance_graphs'),
             'loading_label' => get_string('loading', 'block_performance_graphs'),
+            'load_error_label' => get_string('loaderror', 'block_performance_graphs'),
         ];
 
         $this->content = new stdClass();

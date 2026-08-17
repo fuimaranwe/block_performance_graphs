@@ -37,8 +37,11 @@
         <div id="{{element_id}}-stat-label"></div>
     </div>
 
-    <div id="{{element_id}}-loading" class="chart-loading" role="status" aria-live="polite" hidden>
-        <span>{{loading_label}}</span>
+    <div class="performance-graph-region">
+        <div id="{{element_id}}-loading" class="chart-loading" role="status" aria-live="polite" hidden>
+            <span>{{loading_label}}</span>
+        </div>
+        <div id="{{element_id}}" class="performance-graph-container" aria-live="polite"></div>
     </div>
-    <div id="{{element_id}}" class="performance-graph-container" aria-live="polite"></div>
+    <div id="{{element_id}}-error" class="chart-error" role="alert" hidden>{{load_error_label}}</div>
 </section>
